@@ -2,17 +2,14 @@ import 'package:path/path.dart' as path;
 import 'package:sqflite/sqflite.dart';
 
 class AppDatabase {
-  AppDatabase({
-    DatabaseFactory? factory,
-    this.databasePath,
-  }) : _factory = factory ?? databaseFactory;
+  AppDatabase({DatabaseFactory? factory, this.databasePath})
+      : _factory = factory ?? databaseFactory;
 
   static const _databaseName = 'registro_campo.db';
-  static const _databaseVersion = 1;
+  static const _databaseVersion = 2;
 
   final DatabaseFactory _factory;
   final String? databasePath;
-
   Database? _database;
 
   Future<Database> get database async {
@@ -22,11 +19,8 @@ class AppDatabase {
       return openedDatabase;
     }
 
-    final resolvedPath = databasePath ??
-        path.join(
-          await getDatabasesPath(),
-          _databaseName,
-        );
+    final resolvedPath =
+        databasePath ?? path.join(await getDatabasesPath(), _databaseName);
 
     _database = await _factory.openDatabase(
       resolvedPath,
@@ -36,6 +30,7 @@ class AppDatabase {
           await db.execute('PRAGMA foreign_keys = ON');
         },
         onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
       ),
     );
 
@@ -61,8 +56,10 @@ class AppDatabase {
         data_visita TEXT NOT NULL,
         situacao TEXT NOT NULL,
         foto_path TEXT,
+        foto_url TEXT,
         latitude REAL,
         longitude REAL,
+        removido INTEGER NOT NULL DEFAULT 0,
         status_sync TEXT NOT NULL DEFAULT 'pendente',
         criado_em TEXT NOT NULL,
         atualizado_em TEXT NOT NULL,
@@ -73,15 +70,9 @@ class AppDatabase {
       )
     ''');
 
-    batch.execute('''
-      CREATE INDEX idx_registros_data
-        ON registros (data_visita)
-    ''');
-
-    batch.execute('''
-      CREATE INDEX idx_registros_sync
-        ON registros (status_sync)
-    ''');
+    batch.execute('CREATE INDEX idx_registros_data ON registros (data_visita)');
+    batch.execute('CREATE INDEX idx_registros_sync ON registros (status_sync)');
+    batch.execute('CREATE INDEX idx_registros_removido ON registros (removido)');
 
     for (final nome in const [
       'Inspeção',
@@ -89,13 +80,31 @@ class AppDatabase {
       'Manutenção corretiva',
       'Visita técnica',
     ]) {
-      batch.insert(
-        'categorias',
-        {'nome': nome},
-      );
+      batch.insert('categorias', {'nome': nome});
     }
 
     await batch.commit(noResult: true);
+  }
+
+  Future<void> _onUpgrade(
+      Database db,
+      int oldVersion,
+      int newVersion,
+      ) async {
+    if (oldVersion < 2) {
+      await db.execute(
+        'ALTER TABLE registros ADD COLUMN foto_url TEXT',
+      );
+
+      await db.execute(
+        'ALTER TABLE registros '
+            'ADD COLUMN removido INTEGER NOT NULL DEFAULT 0',
+      );
+
+      await db.execute(
+        'CREATE INDEX idx_registros_removido ON registros (removido)',
+      );
+    }
   }
 
   Future<void> close() async {
